@@ -55,3 +55,7 @@ Actions Secrets: `YC_SA_KEY_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 Успешный запуск Terraform pipeline:
 
 ![Terraform infrastructure: успешные проверки, plan и apply](img/img2.png)
+
+История успешных запусков для PR и push в main:
+
+![Terraform infrastructure: история успешных запусков](img/img3.png)
