@@ -1,0 +1,31 @@
+---
+- name: Deploy application and monitoring
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - vars/platform.yml
+  environment:
+    KUBECONFIG: "{{ kubeconfig_local_path }}"
+    HELM_CACHE_HOME: "{{ platform_local_dir }}/helm/cache"
+    HELM_CONFIG_HOME: "{{ platform_local_dir }}/helm/config"
+    HELM_DATA_HOME: "{{ platform_local_dir }}/helm/data"
+  tasks:
+    - name: Deploy workloads
+      ansible.builtin.import_tasks: tasks/platform.yml
+
+- name: Configure public HTTP entry point
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  vars_files:
+    - vars/platform.yml
+  tasks:
+    - name: Configure reverse proxy
+      ansible.builtin.import_tasks: tasks/proxy.yml
+  handlers:
+    - name: Reload public nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded

@@ -1,0 +1,16 @@
+---
+project_root: "{{ playbook_dir }}/.."
+platform_local_dir: "{{ project_root }}/.local"
+helm_version: "3.22.1"
+helm_archive_checksum: "sha256:896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea"
+helm_binary: "{{ platform_local_dir }}/bin/helm"
+monitoring_chart: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+monitoring_chart_version: "92.20.0"
+monitoring_namespace: monitoring
+monitoring_release: monitoring
+app_namespace: app
+grafana_admin_user: admin
+grafana_password_file: "{{ platform_local_dir }}/grafana-admin-password"
+grafana_admin_secret: grafana-admin
+public_control_ip: "{{ hostvars[groups['control_plane'][0]].ansible_host }}"
+public_url: "http://{{ public_control_ip }}"

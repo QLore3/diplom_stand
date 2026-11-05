@@ -13,7 +13,7 @@
 
 ВМ размещены в зонах `a` и `d`: создание ВМ в `b` недоступно, подсеть `b` сохранена без ВМ. Полный цикл destroy/apply проверим на заключительном этапе.
 
-Приложение: [diplom_app](https://github.com/QLore3/diplom_app), registry — GHCR. Мониторинг и публикация приложения в Kubernetes — следующие этапы.
+Приложение: [diplom_app](https://github.com/QLore3/diplom_app), registry — GHCR. Приложение и мониторинг опубликованы на этапе 4.
 
 ## Этап 2 — Kubernetes
 
@@ -36,4 +36,12 @@ ansible-playbook site.yml
 
 В [diplom_app](https://github.com/QLore3/diplom_app) подготовлены статическая страница с интерактивной схемой стенда, версией релиза и танцующим котиком, собственный Dockerfile и конфигурация nginx.
 
-Публичный образ: `ghcr.io/qlore3/diplom_app:latest`. [Сборка и публикация в GitHub Actions](https://github.com/QLore3/diplom_app/actions/runs/42068945518) прошли успешно. Проверены контейнер без root, HTTP, healthcheck и адаптивный интерфейс. Развёртывание приложения в Kubernetes — следующий этап.
+Публичный образ: `ghcr.io/qlore3/diplom_app:latest`. [Сборка и публикация в GitHub Actions](https://github.com/QLore3/diplom_app/actions/runs/42068945518) прошли успешно. Проверены контейнер без root, HTTP, healthcheck и адаптивный интерфейс. Приложение развёрнуто в Kubernetes на этапе 4.
+
+## Этап 4 — мониторинг и публикация
+
+- [Приложение](http://51.250.73.107/) — две реплики на разных workers, образ закреплён по digest.
+- [Grafana](http://51.250.73.107/grafana/) и [обзор кластера](http://51.250.73.107/grafana/d/diplom-overview) — публичный HTTP/80 через nginx на control plane. Логин `admin`, пароль передаётся отдельно и в Git не хранится.
+- Мониторинг: kube-prometheus-stack 92.20.0 (Helm-сборка kube-prometheus), Prometheus Operator, Prometheus, Alertmanager, Grafana, kube-state-metrics и node-exporter. Проверены 22 targets UP, метрики трёх нод и 26 дашбордов.
+
+Конфигурации находятся в `kubernetes/app` и `kubernetes/monitoring`; развёртывание — `ansible-playbook platform.yml` из `ansible` (коллекция из `requirements.yml`). Повторный запуск не вносит изменений. История Prometheus ограничена 6 часами и 512 МБ; хранилище метрик и Grafana временное. Ресурсы ВМ не увеличивались.

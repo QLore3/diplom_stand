@@ -1,0 +1,152 @@
+---
+- name: Create private local directory
+  ansible.builtin.file:
+    path: "{{ platform_local_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: Create local Helm directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ platform_local_dir }}/bin"
+    - "{{ platform_local_dir }}/helm/releases/{{ helm_version }}"
+
+- name: Download pinned Helm archive
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    checksum: "{{ helm_archive_checksum }}"
+    dest: "{{ platform_local_dir }}/helm.tar.gz"
+    mode: '0600'
+
+- name: Extract Helm
+  ansible.builtin.unarchive:
+    src: "{{ platform_local_dir }}/helm.tar.gz"
+    dest: "{{ platform_local_dir }}/helm/releases/{{ helm_version }}"
+    creates: "{{ platform_local_dir }}/helm/releases/{{ helm_version }}/linux-amd64/helm"
+
+- name: Install local Helm binary
+  ansible.builtin.copy:
+    src: "{{ platform_local_dir }}/helm/releases/{{ helm_version }}/linux-amd64/helm"
+    dest: "{{ helm_binary }}"
+    mode: '0700'
+
+- name: Deploy application resources
+  ansible.builtin.command: "kubectl apply -k {{ project_root }}/kubernetes/app"
+  register: app_apply
+  until: app_apply.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: "'created' in app_apply.stdout or 'configured' in app_apply.stdout"
+
+- name: Create monitoring namespace
+  ansible.builtin.command:
+    argv: [kubectl, apply, -f, '-']
+    stdin: "{{ {'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': monitoring_namespace}} | to_json }}"
+  register: namespace_apply
+  until: namespace_apply.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: "'created' in namespace_apply.stdout or 'configured' in namespace_apply.stdout"
+
+- name: Check local Grafana password
+  ansible.builtin.stat:
+    path: "{{ grafana_password_file }}"
+  register: grafana_password_state
+
+- name: Recover existing Grafana password when controller is new
+  ansible.builtin.command: >-
+    kubectl -n {{ monitoring_namespace }} get secret {{ grafana_admin_secret }} -o jsonpath={.data.admin-password}
+  register: existing_grafana_secret
+  when: not grafana_password_state.stat.exists
+  failed_when: existing_grafana_secret.rc != 0 and 'NotFound' not in existing_grafana_secret.stderr
+  until: existing_grafana_secret.rc == 0 or 'NotFound' in existing_grafana_secret.stderr
+  retries: 3
+  delay: 5
+  changed_when: false
+  no_log: true
+
+- name: Save recovered password locally
+  ansible.builtin.copy:
+    dest: "{{ grafana_password_file }}"
+    content: "{{ existing_grafana_secret.stdout | b64decode }}"
+    mode: '0600'
+  when: not grafana_password_state.stat.exists and existing_grafana_secret.rc == 0
+  no_log: true
+
+- name: Generate persistent local Grafana password
+  ansible.builtin.set_fact:
+    grafana_admin_password: "{{ lookup('ansible.builtin.password', grafana_password_file ~ ' length=28 chars=ascii_letters,digits') }}"
+  no_log: true
+
+- name: Protect Grafana password file
+  ansible.builtin.file:
+    path: "{{ grafana_password_file }}"
+    mode: '0600'
+
+- name: Create Grafana administrator secret
+  ansible.builtin.command:
+    argv: [kubectl, apply, -f, '-']
+    stdin: >-
+      {{ {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': grafana_admin_secret, 'namespace': monitoring_namespace},
+          'type': 'Opaque', 'data': {'admin-user': grafana_admin_user | b64encode, 'admin-password': grafana_admin_password | b64encode}} | to_json }}
+  register: grafana_secret
+  until: grafana_secret.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: "'created' in grafana_secret.stdout or 'configured' in grafana_secret.stdout"
+  no_log: true
+
+- name: Render effective monitoring values
+  ansible.builtin.copy:
+    dest: "{{ platform_local_dir }}/monitoring-values.yaml"
+    content: >-
+      {{ (lookup('ansible.builtin.file', project_root ~ '/kubernetes/monitoring/values.yaml') | from_yaml) |
+         combine({'grafana': {'grafana.ini': {'server': {'root_url': public_url ~ '/grafana/', 'domain': public_control_ip}}}}, recursive=true) |
+         to_nice_yaml }}
+    mode: '0600'
+
+- name: Install pinned kube-prometheus stack
+  kubernetes.core.helm:
+    binary_path: "{{ helm_binary }}"
+    kubeconfig: "{{ kubeconfig_local_path }}"
+    name: "{{ monitoring_release }}"
+    chart_ref: "{{ monitoring_chart }}"
+    chart_version: "{{ monitoring_chart_version }}"
+    release_namespace: "{{ monitoring_namespace }}"
+    values_files:
+      - "{{ platform_local_dir }}/monitoring-values.yaml"
+    wait: true
+    timeout: 15m
+    atomic: true
+    history_max: 3
+
+- name: Wait for Prometheus and Alertmanager workloads
+  ansible.builtin.command: >-
+    kubectl -n {{ monitoring_namespace }} rollout status statefulset/{{ item }} --timeout=600s
+  loop:
+    - "prometheus-{{ monitoring_release }}-prometheus"
+    - "alertmanager-{{ monitoring_release }}-alertmanager"
+  register: monitoring_rollout
+  until: monitoring_rollout.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: false
+
+- name: Provision diploma dashboard
+  ansible.builtin.command: "kubectl apply -k {{ project_root }}/kubernetes/monitoring"
+  register: dashboard_apply
+  until: dashboard_apply.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: "'created' in dashboard_apply.stdout or 'configured' in dashboard_apply.stdout"
+
+- name: Wait for application rollout
+  ansible.builtin.command: "kubectl -n {{ app_namespace }} rollout status deployment/diplom-app --timeout=300s"
+  register: app_rollout
+  until: app_rollout.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: false
