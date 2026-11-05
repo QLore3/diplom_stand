@@ -115,7 +115,9 @@ variable "assign_public_ip" {
 variable "labels" {
   description = "Дополнительные метки ВМ."
   type        = map(string)
-  default     = {}
+  default = {
+    managed_by = "terraform"
+  }
 }
 
 variable "ssh_port" {
