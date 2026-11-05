@@ -1,0 +1,17 @@
+# Credentials, local configuration and Terraform state
+.local/
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.example.tfvars
+crash.log
+crash.*.log
+backend.hcl
+key.json
+*.pem
+
+# Local working materials
+/docs/
+/scripts/
