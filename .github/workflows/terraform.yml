@@ -1,0 +1,149 @@
+name: Terraform infrastructure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation on main
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Format and validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform/main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.12.1
+          terraform_wrapper: false
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive ..
+      - name: Terraform init without backend
+        run: terraform init -backend=false -input=false -lockfile=readonly
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+  terraform:
+    name: Plan and apply
+    needs: checks
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: terraform-main
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform/main
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.12.1
+          terraform_wrapper: false
+
+      - name: Prepare credentials and configuration
+        env:
+          YC_SA_KEY_JSON: ${{ secrets.YC_SA_KEY_JSON }}
+          TF_VARS_JSON: ${{ vars.TF_VARS_JSON }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          for name in ['YC_SA_KEY_JSON', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'TF_VARS_JSON', 'TF_STATE_BUCKET']:
+              if not os.environ.get(name):
+                  raise SystemExit(f'Missing repository secret or variable: {name}')
+          key = json.loads(os.environ['YC_SA_KEY_JSON'])
+          if not key.get('private_key') or not key.get('service_account_id'):
+              raise SystemExit('YC_SA_KEY_JSON must contain an authorized service-account key')
+          variables = json.loads(os.environ['TF_VARS_JSON'])
+          if not isinstance(variables, dict):
+              raise SystemExit('TF_VARS_JSON must be a JSON object')
+          os.umask(0o077)
+          temp = Path(os.environ['RUNNER_TEMP'])
+          (temp / 'yc-key.json').write_text(json.dumps(key))
+          (temp / 'terraform.tfvars.json').write_text(json.dumps(variables))
+          bucket = json.dumps(os.environ['TF_STATE_BUCKET'])
+          (temp / 'backend.hcl').write_text(
+              'endpoints = { s3 = "https://storage.yandexcloud.net" }\n'
+              f'bucket = {bucket}\n'
+              'key = "diplom/main.tfstate"\nregion = "ru-central1"\n'
+              'skip_credentials_validation = true\nskip_region_validation = true\n'
+              'skip_requesting_account_id = true\nuse_lockfile = true\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'TF_VAR_infra_key_file={temp / "yc-key.json"}\n')
+          PY
+
+      - name: Terraform init
+        run: terraform init -input=false -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.hcl"
+      - name: Terraform plan
+        run: >-
+          terraform plan -input=false -no-color -lock-timeout=5m
+          -var-file="$RUNNER_TEMP/terraform.tfvars.json"
+          -out="$RUNNER_TEMP/main.tfplan"
+      - name: Summarize plan
+        run: |
+          terraform show -json "$RUNNER_TEMP/main.tfplan" | python3 -c '
+          import json, os, sys
+          changes = json.load(sys.stdin).get("resource_changes", [])
+          counts = {a: sum(a in c["change"]["actions"] for c in changes) for a in ["create", "update", "delete"]}
+          text = "Plan: {create} create, {update} update, {delete} delete.".format(**counts)
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("### Terraform infrastructure\n\n" + text + "\n")
+          '
+      - name: Terraform apply
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.operation == 'apply')
+        run: terraform apply -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/main.tfplan"
+      - name: Verify no drift
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.operation == 'apply')
+        run: >-
+          terraform plan -input=false -no-color -detailed-exitcode -lock-timeout=5m
+          -var-file="$RUNNER_TEMP/terraform.tfvars.json"
+      - name: Remove temporary credentials and plan
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for name in ['yc-key.json', 'terraform.tfvars.json', 'backend.hcl', 'main.tfplan']:
+              (Path(os.environ['RUNNER_TEMP']) / name).unlink(missing_ok=True)
+          PY

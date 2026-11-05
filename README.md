@@ -45,3 +45,9 @@ ansible-playbook site.yml
 - Мониторинг: kube-prometheus-stack 92.20.0 (Helm-сборка kube-prometheus), Prometheus Operator, Prometheus, Alertmanager, Grafana, kube-state-metrics и node-exporter. Проверены 22 targets UP, метрики трёх нод и 26 дашбордов.
 
 Конфигурации находятся в `kubernetes/app` и `kubernetes/monitoring`; развёртывание — `ansible-playbook platform.yml` из `ansible` (коллекция из `requirements.yml`). Повторный запуск не вносит изменений. История Prometheus ограничена 6 часами и 512 МБ; хранилище метрик и Grafana временное. Ресурсы ВМ не увеличивались.
+
+## Terraform pipeline
+
+`.github/workflows/terraform.yml`: fmt/validate для PR, plan для PR внутри репозитория; при каждом push в `main` — plan, apply сохранённого плана и проверка отсутствия drift. Запуски main сериализованы, state и блокировка находятся в S3. Bootstrap в pipeline не запускается; plan и credentials не загружаются в artifacts.
+
+Actions Secrets: `YC_SA_KEY_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`. Variables: `TF_VARS_JSON` (публичные Terraform-параметры в JSON), `TF_STATE_BUCKET`. PR из fork получают только проверки без облачных credentials. Ручной запуск поддерживает `plan` и `apply` для `main`.
