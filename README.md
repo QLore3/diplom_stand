@@ -13,7 +13,7 @@
 
 ВМ размещены в зонах `a` и `d`: создание ВМ в `b` недоступно, подсеть `b` сохранена без ВМ. Полный цикл destroy/apply проверим на заключительном этапе.
 
-Приложение: [diplom_app](https://github.com/QLore3/diplom_app), registry — GHCR. Приложение и мониторинг — следующие этапы.
+Приложение: [diplom_app](https://github.com/QLore3/diplom_app), registry — GHCR. Мониторинг и публикация приложения в Kubernetes — следующие этапы.
 
 ## Этап 2 — Kubernetes
 
@@ -31,3 +31,9 @@ ansible-playbook site.yml
 Результат проверки нод и системных pod'ов:
 
 ![Три ноды Ready и системные pod'ы Running](img/img1.png)
+
+## Этап 3 — тестовое приложение
+
+В [diplom_app](https://github.com/QLore3/diplom_app) подготовлены статическая страница с интерактивной схемой стенда, версией релиза и танцующим котиком, собственный Dockerfile и конфигурация nginx.
+
+Публичный образ: `ghcr.io/qlore3/diplom_app:latest`. [Сборка и публикация в GitHub Actions](https://github.com/QLore3/diplom_app/actions/runs/42068945518) прошли успешно. Проверены контейнер без root, HTTP, healthcheck и адаптивный интерфейс. Развёртывание приложения в Kubernetes — следующий этап.
