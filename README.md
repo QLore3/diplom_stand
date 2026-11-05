@@ -27,3 +27,7 @@ ansible-playbook site.yml
 Для доступа к S3 state используются переменные `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` либо локальный `.local/backend-credentials.json`. Kubeconfig создаётся в `.local/kubeconfig`; на рабочей машине также установлен в `~/.kube/config`. Ключ SSH должен быть доступен через стандартный путь или ssh-agent.
 
 Проверены три ноды Ready, системные pod'ы, DNS, Service и связь pod'ов между зонами. Повторный запуск Ansible не вносит изменений. Конфигурации доступа, токены и логи в Git не хранятся.
+
+Результат проверки нод и системных pod'ов:
+
+![Три ноды Ready и системные pod'ы Running](img/img1.png)
