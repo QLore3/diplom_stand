@@ -51,3 +51,7 @@ ansible-playbook site.yml
 `.github/workflows/terraform.yml`: fmt/validate для PR, plan для PR внутри репозитория; при каждом push в `main` — plan, apply сохранённого плана и проверка отсутствия drift. Запуски main сериализованы, state и блокировка находятся в S3. Bootstrap в pipeline не запускается; plan и credentials не загружаются в artifacts.
 
 Actions Secrets: `YC_SA_KEY_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`. Variables: `TF_VARS_JSON` (публичные Terraform-параметры в JSON), `TF_STATE_BUCKET`. PR из fork получают только проверки без облачных credentials. Ручной запуск поддерживает `plan` и `apply` для `main`.
+
+Успешный запуск Terraform pipeline:
+
+![Terraform infrastructure: успешные проверки, plan и apply](img/img2.png)
