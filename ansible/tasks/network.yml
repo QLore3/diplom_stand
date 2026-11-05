@@ -1,0 +1,47 @@
+---
+- name: Download pinned Flannel manifest
+  ansible.builtin.get_url:
+    url: "https://github.com/flannel-io/flannel/releases/download/{{ flannel_version }}/kube-flannel.yml"
+    checksum: "{{ flannel_manifest_checksum }}"
+    dest: /etc/kube-flannel.upstream.yml
+    mode: '0644'
+
+- name: Read upstream Flannel manifest
+  ansible.builtin.slurp:
+    src: /etc/kube-flannel.upstream.yml
+  register: flannel_upstream
+
+- name: Render Flannel pod network
+  ansible.builtin.copy:
+    dest: /etc/kube-flannel.yml
+    content: >-
+      {{ flannel_upstream.content | b64decode |
+         replace('"Network": "10.244.0.0/16"', '"Network": "' ~ pod_network_cidr ~ '"') }}
+    mode: '0644'
+
+- name: Apply Flannel networking
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /etc/kube-flannel.yml
+  register: flannel_apply
+  changed_when: "'created' in flannel_apply.stdout or 'configured' in flannel_apply.stdout"
+
+- name: Wait for all Kubernetes nodes
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=Ready nodes --all --timeout=300s
+  changed_when: false
+
+- name: Wait for Flannel rollout
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-flannel rollout status daemonset/kube-flannel-ds --timeout=300s
+  changed_when: false
+
+- name: Wait for CoreDNS rollout
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system rollout status deployment/coredns --timeout=300s
+  changed_when: false
+
+- name: Read registered Kubernetes nodes
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o json
+  register: registered_nodes
+  changed_when: false
+
+- name: Check expected node count
+  ansible.builtin.assert:
+    that:
+      - (registered_nodes.stdout | from_json)['items'] | length == groups['k8s_cluster'] | length

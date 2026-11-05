@@ -1,0 +1,11 @@
+---
+- name: Join workers using private control plane endpoint
+  ansible.builtin.command: >-
+    {{ hostvars[groups['control_plane'][0]].cluster_join.stdout }}
+    --cri-socket {{ container_runtime_socket }}
+  args:
+    creates: /etc/kubernetes/kubelet.conf
+  no_log: true
+  async: 600
+  poll: 10
+  when: hostvars[groups['control_plane'][0]].cluster_join is not skipped

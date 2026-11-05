@@ -1,0 +1,33 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ node_ip }}
+  bindPort: 6443
+nodeRegistration:
+  name: {{ ansible_hostname }}
+  criSocket: {{ container_runtime_socket }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ cluster_name }}
+kubernetesVersion: v{{ kubernetes_version }}
+controlPlaneEndpoint: "{{ node_ip }}:6443"
+apiServer:
+  certSANs:
+    - "{{ ansible_host }}"
+    - "{{ node_ip }}"
+networking:
+  podSubnet: {{ pod_network_cidr }}
+  serviceSubnet: {{ service_network_cidr }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+containerLogMaxSize: 10Mi
+containerLogMaxFiles: 3
+imageGCHighThresholdPercent: 70
+imageGCLowThresholdPercent: 50
+systemReserved:
+  memory: 128Mi
+kubeReserved:
+  memory: 128Mi

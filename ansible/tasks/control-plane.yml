@@ -1,0 +1,46 @@
+---
+- name: Render kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm.yml.j2
+    dest: /etc/kubernetes-init.yml
+    mode: '0600'
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command: kubeadm init --config=/etc/kubernetes-init.yml
+  args:
+    creates: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+  no_log: true
+  async: 900
+  poll: 10
+
+- name: Check worker membership files
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['workers'] }}"
+  register: worker_membership
+
+- name: Create short-lived join command when workers need bootstrap
+  ansible.builtin.command: kubeadm token create --ttl 30m --print-join-command
+  when: worker_membership.results | rejectattr('stat.exists') | list | length > 0
+  register: cluster_join
+  changed_when: true
+  no_log: true
+
+- name: Read administrator kubeconfig
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/admin.conf
+  register: administrator_config
+  no_log: true
+
+- name: Save protected local kubeconfig with external API address
+  ansible.builtin.copy:
+    content: >-
+      {{ administrator_config.content | b64decode |
+         regex_replace(('https://' ~ node_ip ~ ':6443') | regex_escape, 'https://' ~ ansible_host ~ ':6443') }}
+    dest: "{{ kubeconfig_local_path }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  no_log: true

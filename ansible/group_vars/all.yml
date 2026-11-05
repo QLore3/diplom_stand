@@ -1,0 +1,13 @@
+---
+kubernetes_version: "1.36.6"
+kubernetes_package_version: "{{ kubernetes_version }}-1.1"
+kubernetes_minor_version: "{{ kubernetes_version.split('.')[0:2] | join('.') }}"
+containerd_package_version: "2.2.1-0ubuntu1~24.04.4"
+flannel_version: "v0.28.10"
+flannel_manifest_checksum: "sha256:393bdbce53eb50c8eb97dd513b218518b7d6e7985dc7b889be956e112a711084"
+pod_network_cidr: "10.244.0.0/16"
+service_network_cidr: "10.96.0.0/12"
+container_runtime_socket: "unix:///run/containerd/containerd.sock"
+sandbox_image: "registry.k8s.io/pause:3.10.2"
+cluster_name: diplom
+kubeconfig_local_path: "{{ playbook_dir }}/../.local/kubeconfig"
