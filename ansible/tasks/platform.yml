@@ -150,6 +150,10 @@
     timeout: 15m
     atomic: true
     history_max: 3
+  register: monitoring_helm
+  until: monitoring_helm is succeeded
+  retries: 3
+  delay: 5
 
 - name: Wait for Prometheus and Alertmanager workloads
   ansible.builtin.command: >-

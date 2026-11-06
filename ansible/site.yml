@@ -2,6 +2,23 @@
 - name: Prepare Kubernetes nodes
   hosts: k8s_cluster
   become: true
+  gather_facts: false
+  pre_tasks:
+    - name: Wait for freshly created nodes
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        sleep: 5
+
+    - name: Wait for initial cloud configuration
+      ansible.builtin.command: cloud-init status --wait
+      register: cloud_init_status
+      changed_when: false
+      failed_when: cloud_init_status.rc not in [0, 2]
+      async: 600
+      poll: 10
+
+    - name: Gather node facts after cloud initialization
+      ansible.builtin.setup:
   tasks:
     - name: Configure OS and container runtime
       ansible.builtin.import_tasks: tasks/prepare.yml
