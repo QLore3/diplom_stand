@@ -1,0 +1,194 @@
+---
+- name: Configure restricted application delivery
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  vars_files:
+    - vars/delivery.yml
+  tasks:
+    - name: Install WireGuard tools
+      ansible.builtin.apt:
+        name: wireguard-tools
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create private delivery directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - /etc/wireguard
+        - "{{ delivery_remote_dir }}"
+
+    - name: Generate persistent WireGuard keys
+      ansible.builtin.shell: "umask 077; wg genkey > {{ delivery_remote_dir }}/{{ item }}.key"
+      args:
+        creates: "{{ delivery_remote_dir }}/{{ item }}.key"
+      loop: [server, runner]
+      no_log: true
+
+    - name: Read server WireGuard private key
+      ansible.builtin.slurp:
+        src: "{{ delivery_remote_dir }}/server.key"
+      register: delivery_server_private
+      no_log: true
+
+    - name: Read runner WireGuard private key
+      ansible.builtin.slurp:
+        src: "{{ delivery_remote_dir }}/runner.key"
+      register: delivery_client_private
+      no_log: true
+
+    - name: Derive server WireGuard public key
+      ansible.builtin.command: wg pubkey
+      args:
+        stdin: "{{ delivery_server_private.content | b64decode }}"
+      register: delivery_server_public
+      changed_when: false
+      no_log: true
+
+    - name: Derive runner WireGuard public key
+      ansible.builtin.command: wg pubkey
+      args:
+        stdin: "{{ delivery_client_private.content | b64decode }}"
+      register: delivery_client_public
+      changed_when: false
+      no_log: true
+
+    - name: Configure restricted WireGuard server
+      ansible.builtin.template:
+        src: templates/wg-ci.conf.j2
+        dest: "/etc/wireguard/{{ delivery_interface }}.conf"
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart delivery tunnel
+      no_log: true
+
+    - name: Enable delivery tunnel
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ delivery_interface }}"
+        enabled: true
+        state: started
+
+    - name: Generate client TLS private key and CSR
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -newkey
+          - rsa:2048
+          - -nodes
+          - -keyout
+          - "{{ delivery_remote_dir }}/client.key"
+          - -out
+          - "{{ delivery_remote_dir }}/client.csr"
+          - -subj
+          - "/CN={{ delivery_user }}"
+        creates: "{{ delivery_remote_dir }}/client.key"
+      no_log: true
+
+    - name: Restrict client key permissions
+      ansible.builtin.file:
+        path: "{{ delivery_remote_dir }}/client.key"
+        mode: '0600'
+
+    - name: Check client certificate expiry
+      ansible.builtin.command:
+        argv: [openssl, x509, -checkend, "{{ delivery_certificate_renew_seconds | string }}", -noout, -in, "{{ delivery_remote_dir }}/client.crt"]
+      register: delivery_expiry
+      failed_when: delivery_expiry.rc not in [0, 1]
+      changed_when: false
+
+    - name: Configure client-only certificate usage
+      ansible.builtin.copy:
+        dest: "{{ delivery_remote_dir }}/client.ext"
+        content: |
+          basicConstraints = critical, CA:FALSE
+          keyUsage = critical, digitalSignature, keyEncipherment
+          extendedKeyUsage = clientAuth
+        mode: '0600'
+      register: delivery_extensions
+
+    - name: Sign restricted client certificate with cluster CA
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -in
+          - "{{ delivery_remote_dir }}/client.csr"
+          - -CA
+          - /etc/kubernetes/pki/ca.crt
+          - -CAkey
+          - /etc/kubernetes/pki/ca.key
+          - -set_serial
+          - "0x{{ lookup('pipe', 'openssl rand -hex 16') }}"
+          - -extfile
+          - "{{ delivery_remote_dir }}/client.ext"
+          - -days
+          - "{{ delivery_certificate_days | string }}"
+          - -out
+          - "{{ delivery_remote_dir }}/client.crt"
+      when: delivery_expiry.rc != 0 or delivery_extensions.changed
+      no_log: true
+
+    - name: Apply application deployer RBAC
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, apply, -f, '-']
+        stdin: "{{ lookup('file', playbook_dir ~ '/../kubernetes/app/delivery-rbac.yaml') }}"
+      register: delivery_rbac
+      changed_when: "'created' in delivery_rbac.stdout or 'configured' in delivery_rbac.stdout"
+
+    - name: Read public cluster CA
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/pki/ca.crt
+      register: delivery_ca
+      no_log: true
+
+    - name: Read delivery certificate
+      ansible.builtin.slurp:
+        src: "{{ delivery_remote_dir }}/client.crt"
+      register: delivery_certificate
+      no_log: true
+
+    - name: Read delivery TLS private key
+      ansible.builtin.slurp:
+        src: "{{ delivery_remote_dir }}/client.key"
+      register: delivery_client_key
+      no_log: true
+
+    - name: Create local private credentials directory
+      ansible.builtin.file:
+        path: "{{ delivery_local_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Export runner tunnel configuration
+      ansible.builtin.template:
+        src: templates/wg-runner.conf.j2
+        dest: "{{ delivery_local_dir }}/{{ delivery_interface }}.conf"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Export namespace-scoped kubeconfig
+      ansible.builtin.template:
+        src: templates/delivery-kubeconfig.j2
+        dest: "{{ delivery_local_dir }}/kubeconfig"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  handlers:
+    - name: Restart delivery tunnel
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ delivery_interface }}"
+        state: restarted

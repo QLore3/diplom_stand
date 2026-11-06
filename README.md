@@ -59,3 +59,18 @@ Actions Secrets: `YC_SA_KEY_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 История успешных запусков для PR и push в main:
 
 ![Terraform infrastructure: история успешных запусков](img/img3.png)
+
+## CI/CD приложения
+
+В `diplom_app` GitHub Actions собирает и тестирует контейнер при каждом push; тег `v1.0.0` публикует версию в GHCR и запускает деплой по digest, проверку rollout и публичной версии. При неудаче возвращается предыдущий образ.
+
+`ansible-playbook delivery.yml` настраивает WireGuard на существующем control plane. Туннель пропускает только Kubernetes API; SSH/API снаружи сохраняют административный CIDR. RBAC разрешает deployer обновлять только `app/diplom-app`; namespace применяет Pod Security Restricted. При повторном `platform.yml` текущий образ релиза сохраняется.
+
+Runner использует Secrets `WIREGUARD_CONFIG`, `DELIVERY_KUBECONFIG` и Variable `PUBLIC_APP_URL` репозитория приложения. Конфиги экспортируются в игнорируемый `.local/delivery/` с правами 600. Клиентский сертификат действует 30 дней; повторный `delivery.yml` обновляет его, когда остаётся меньше 7 дней. После создания/обновления доступа загрузить конфиги из каталога `ansible`:
+
+```bash
+gh secret set WIREGUARD_CONFIG --repo QLore3/diplom_app < ../.local/delivery/wg-ci.conf
+gh secret set DELIVERY_KUBECONFIG --repo QLore3/diplom_app < ../.local/delivery/kubeconfig
+```
+
+Проверен [релиз v1.0.0: сборка и автоматический деплой](https://github.com/QLore3/diplom_app/actions/runs/42174760713). Образ: `ghcr.io/qlore3/diplom_app:v1.0.0`. Проверены откат при недоступном образе и две готовые реплики на разных workers.

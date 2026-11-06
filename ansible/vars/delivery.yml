@@ -1,0 +1,13 @@
+---
+delivery_interface: wg-ci
+delivery_port: 51820
+delivery_server_ip: 172.30.99.1
+delivery_client_ip: 172.30.99.2
+delivery_api_port: 6443
+delivery_user: diplom-app-deployer
+delivery_namespace: app
+delivery_deployment: diplom-app
+delivery_certificate_days: 30
+delivery_certificate_renew_seconds: 604800
+delivery_remote_dir: /etc/wireguard/delivery
+delivery_local_dir: "{{ playbook_dir }}/../.local/delivery"

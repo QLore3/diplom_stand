@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - deployment.yaml
   - service.yaml
+  - delivery-rbac.yaml
 images:
   - name: ghcr.io/qlore3/diplom_app
     digest: sha256:d05828e49d70572a0c5b86b438fdf41b91ff4035f5a37dab09ff6a34309b7cd1

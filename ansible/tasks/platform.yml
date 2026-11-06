@@ -33,8 +33,36 @@
     dest: "{{ helm_binary }}"
     mode: '0700'
 
-- name: Deploy application resources
-  ansible.builtin.command: "kubectl apply -k {{ project_root }}/kubernetes/app"
+# Application releases belong to CD. Reapplying the platform must preserve its image.
+- name: Read current application deployment
+  ansible.builtin.command: >-
+    kubectl -n {{ app_namespace }} get deployment diplom-app --ignore-not-found -o json
+  register: current_app
+  until: current_app.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: false
+
+- name: Render application resources
+  ansible.builtin.command: "kubectl kustomize {{ project_root }}/kubernetes/app"
+  register: app_manifests
+  changed_when: false
+
+- name: Apply application resources while preserving the released image
+  ansible.builtin.command:
+    argv: [kubectl, apply, -f, '-']
+    stdin: >-
+      {% set resource = item %}
+      {% if item.kind == 'Deployment' and current_app.stdout | length > 0 %}
+      {% set live = current_app.stdout | from_json %}
+      {% set containers = item.spec.template.spec.containers %}
+      {% set updated = containers[0] | combine({'image': live.spec.template.spec.containers[0].image}) %}
+      {% set resource = item | combine({'spec': {'template': {'spec': {'containers': [updated]}}}}, recursive=true) %}
+      {% endif %}
+      {{ resource | to_json }}
+  loop: "{{ app_manifests.stdout | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
   register: app_apply
   until: app_apply.rc == 0
   retries: 3

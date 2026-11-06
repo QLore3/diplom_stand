@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: diplom-app-deployer
+  namespace: app
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [diplom-app]
+    verbs: [get, list, watch, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diplom-app-deployer
+  namespace: app
+subjects:
+  - kind: User
+    name: diplom-app-deployer
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: diplom-app-deployer
+  apiGroup: rbac.authorization.k8s.io
