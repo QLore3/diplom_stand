@@ -149,3 +149,19 @@ variable "egress_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "delivery_wireguard_port" {
+  description = "UDP-порт WireGuard для GitHub-hosted runner. SSH/API остаются ограничены admin_cidr."
+  type        = number
+  default     = 51820
+  validation {
+    condition     = var.delivery_wireguard_port >= 1024 && var.delivery_wireguard_port <= 65535
+    error_message = "Укажите UDP-порт от 1024 до 65535."
+  }
+}
+
+variable "delivery_wireguard_cidrs" {
+  description = "Источники зашифрованного WireGuard: GitHub-hosted runners имеют динамические IP."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}

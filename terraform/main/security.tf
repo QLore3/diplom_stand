@@ -29,6 +29,12 @@ resource "yandex_vpc_security_group" "control" {
     v4_cidr_blocks = [var.admin_cidr]
   }
   ingress {
+    description    = "Authenticated WireGuard tunnel for application delivery"
+    protocol       = "UDP"
+    port           = var.delivery_wireguard_port
+    v4_cidr_blocks = var.delivery_wireguard_cidrs
+  }
+  ingress {
     description    = "Application and Grafana HTTP entry point"
     protocol       = "TCP"
     port           = var.http_port
